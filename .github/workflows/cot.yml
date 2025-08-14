@@ -2,8 +2,10 @@ name: COT weekly fetch
 
 on:
   schedule:
-    # Run every 15 minutes on Fridays (UTC). We'll gate below to only run at 15:31 New York time.
-    - cron: "*/15 * * * 5"
+    # 3:31 PM EDT (UTC-4) — roughly Mar–Nov
+    - cron: "31 19 * * 5"
+    # 3:31 PM EST (UTC-5) — roughly Nov–Mar
+    - cron: "31 20 * * 5"
   workflow_dispatch:
 
 permissions:
@@ -12,7 +14,6 @@ permissions:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,28 +28,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Record current New York time into an env var (handles DST automatically)
-      - name: Get New York time
-        run: |
-          python - <<'PY'
-from datetime import datetime
-import zoneinfo, os
-ny = datetime.now(zoneinfo.ZoneInfo("America/New_York"))
-print("New York time:", ny.strftime("%Y-%m-%d %H:%M"))
-with open(os.environ["GITHUB_ENV"], "a") as f:
-    f.write(f"NY_TIME={ny.strftime('%H:%M')}\n")
-PY
-
-      # Only run the fetch when it's exactly 15:31 New York time
       - name: Run fetcher
-        if: env.NY_TIME == '15:31'
         env:
           OUT_DIR: data
           YEARS_BACK: "0"
         run: python cot_fetch.py
 
       - name: Commit & push results
-        if: env.NY_TIME == '15:31'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
