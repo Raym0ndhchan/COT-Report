@@ -1,0 +1,76 @@
+name: COT weekly fetch
+
+on:
+  schedule:
+    # 3:31 PM EDT (UTC-4) — roughly Mar–Nov
+    - cron: "31 19 * * 5"
+    # 3:31 PM EST (UTC-5) — roughly Nov–Mar
+    - cron: "31 20 * * 5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Install dependencies if requirements.txt exists; skip otherwise
+      - name: Install dependencies (if any)
+        run: |
+          if [ -f requirements.txt ]; then
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+          else
+            echo "No requirements.txt found; skipping dependency install."
+          fi
+
+      # Show and compile the script so any syntax issues are obvious in logs
+      - name: Show script
+        run: |
+          echo "----- cot_fetch.py (first 80 lines) -----"
+          sed -n '1,80p' cot_fetch.py
+
+      - name: Syntax check
+        run: python -m py_compile cot_fetch.py
+
+      # Run the fetcher (retry once on transient errors)
+      - name: Run fetcher
+        env:
+          OUT_DIR: data
+          YEARS_BACK: "0"
+        run: |
+          set -e
+          python cot_fetch.py || (echo "First attempt failed; retrying in 30s..." && sleep 30 && python cot_fetch.py)
+
+      # Create the data directory if it doesn't exist (harmless if it does)
+      - name: Ensure data directory exists
+        run: mkdir -p data
+
+      # Commit & push only if there are file changes
+      - name: Detect changes
+        id: changes
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit & push results
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "COT update: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git push
