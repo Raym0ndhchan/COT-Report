@@ -1,4 +1,7 @@
 # cot_fetch.py
+# Fetches Disaggregated Futures-Only COT (current year ZIP), selects the latest report week,
+# saves date-stamped CSV/Parquet into data/YYYY/, and refreshes a "latest" file for that year.
+
 import io, zipfile, re, os, sys
 from pathlib import Path
 from datetime import datetime
@@ -9,20 +12,26 @@ import zoneinfo
 
 HIST_URL_PATTERN = "https://www.cftc.gov/files/dea/history/fut_disagg_txt_{year}.zip"
 OUT_DIR = Path(os.environ.get("OUT_DIR", "data")).resolve()
-YEARS_BACK = int(os.environ.get("YEARS_BACK", "0"))
-WRITE_PARQUET = True
+YEARS_BACK = int(os.environ.get("YEARS_BACK", "0"))  # 0 = current year only
+WRITE_PARQUET = True  # change to False if you don't want parquet
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"),
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+    ),
     "Accept": "text/csv, text/plain;q=0.9, */*;q=0.8",
 }
 
-class HttpError(Exception): pass
+class HttpError(Exception):
+    pass
 
-@retry(reraise=True, stop=stop_after_attempt(4),
-       wait=wait_exponential(multiplier=0.8, min=1, max=10),
-       retry=retry_if_exception_type(HttpError))
+@retry(
+    reraise=True,
+    stop=stop_after_attempt(4),
+    wait=wait_exponential(multiplier=0.8, min=1, max=10),
+    retry=retry_if_exception_type(HttpError),
+)
 def http_get_bytes(url: str, timeout=90) -> bytes:
     r = requests.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
     if r.status_code >= 400:
@@ -40,7 +49,7 @@ def fetch_year(year: int) -> pd.DataFrame:
         names = zf.namelist()
         if not names:
             raise RuntimeError("Zip archive empty.")
-        member = next((n for n in names if n.lower().endswith((".txt", ".csv"))), names[0])
+        member = next((n for n in names if n.lower().endswith(('.txt', '.csv'))), names[0])
         print(f"[FETCH] {year} → reading: {member}")
         with zf.open(member) as f:
             b = f.read()
@@ -49,6 +58,7 @@ def fetch_year(year: int) -> pd.DataFrame:
     return df
 
 def find_date_col(df: pd.DataFrame) -> str:
+    # Robust match for the official date column
     candidates = ["Report_Date_as_YYYY-MM-DD", "Report_Date_as_YYYY_MM_DD", "As_of_Date_In_Form_YYMMDD"]
     def norm(s): return re.sub(r"[^0-9a-z]+", "", s.lower())
     cmap = {norm(c): c for c in df.columns}
@@ -78,6 +88,7 @@ def main():
     print(f"[RUN] Latest report_date: {latest_date.date()}")
     latest_week = df_all.loc[dates == latest_date].copy()
 
+    # Save into data/YYYY/
     year_dir = OUT_DIR / str(latest_date.year)
     year_dir.mkdir(parents=True, exist_ok=True)
 
@@ -112,5 +123,5 @@ if __name__ == "__main__":
         import traceback
         print("[ERROR] Unhandled exception in cot_fetch.py:", e)
         traceback.print_exc()
-        # Do not fail the workflow; just exit 0 so the job continues
+        # Don't fail the workflow on transient issues
         sys.exit(0)
