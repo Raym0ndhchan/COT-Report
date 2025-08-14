@@ -2,14 +2,16 @@ name: COT weekly fetch
 
 on:
   schedule:
-    - cron: "*/15 * * * 5"   # every 15 minutes on Fridays (UTC)
+    # Run every 15 minutes on Fridays (UTC). We'll gate below to only run at 15:31 New York time.
+    - cron: "*/15 * * * 5"
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write   # allow this workflow to push data files back to the repo
 
     steps:
       - name: Checkout
@@ -25,32 +27,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Gate so it runs at exactly 15:31 America/New_York (handles DST)
-      - name: Gate by New York time (run only at 15:31 ET)
-        id: gate
+      # Record current New York time into an env var (handles DST automatically)
+      - name: Get New York time
         run: |
-          python - << 'PY'
+          python - <<'PY'
 from datetime import datetime
 import zoneinfo, os
 ny = datetime.now(zoneinfo.ZoneInfo("America/New_York"))
 print("New York time:", ny.strftime("%Y-%m-%d %H:%M"))
-if ny.strftime("%H:%M") != "15:31":
-    print("Not 15:31 ET; exiting.")
-    open(os.environ['GITHUB_OUTPUT'], 'a').write("run_job=false\n")
-else:
-    open(os.environ['GITHUB_OUTPUT'], 'a').write("run_job=true\n")
+with open(os.environ["GITHUB_ENV"], "a") as f:
+    f.write(f"NY_TIME={ny.strftime('%H:%M')}\n")
 PY
 
+      # Only run the fetch when it's exactly 15:31 New York time
       - name: Run fetcher
-        if: steps.gate.outputs.run_job == 'true'
+        if: env.NY_TIME == '15:31'
         env:
           OUT_DIR: data
           YEARS_BACK: "0"
-        run: |
-          python cot_fetch.py
+        run: python cot_fetch.py
 
       - name: Commit & push results
-        if: steps.gate.outputs.run_job == 'true'
+        if: env.NY_TIME == '15:31'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
