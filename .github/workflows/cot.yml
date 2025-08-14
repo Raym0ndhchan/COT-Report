@@ -1,0 +1,59 @@
+name: COT weekly fetch
+
+on:
+  schedule:
+    - cron: "*/15 * * * 5"   # every 15 minutes on Fridays (UTC)
+  workflow_dispatch:
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # allow this workflow to push data files back to the repo
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Gate so it runs at exactly 15:31 America/New_York (handles DST)
+      - name: Gate by New York time (run only at 15:31 ET)
+        id: gate
+        run: |
+          python - << 'PY'
+from datetime import datetime
+import zoneinfo, os
+ny = datetime.now(zoneinfo.ZoneInfo("America/New_York"))
+print("New York time:", ny.strftime("%Y-%m-%d %H:%M"))
+if ny.strftime("%H:%M") != "15:31":
+    print("Not 15:31 ET; exiting.")
+    open(os.environ['GITHUB_OUTPUT'], 'a').write("run_job=false\n")
+else:
+    open(os.environ['GITHUB_OUTPUT'], 'a').write("run_job=true\n")
+PY
+
+      - name: Run fetcher
+        if: steps.gate.outputs.run_job == 'true'
+        env:
+          OUT_DIR: data
+          YEARS_BACK: "0"
+        run: |
+          python cot_fetch.py
+
+      - name: Commit & push results
+        if: steps.gate.outputs.run_job == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "COT update: $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "No changes"
+          git push
