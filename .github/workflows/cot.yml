@@ -34,6 +34,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # --- NEW: show and compile the script so syntax errors are obvious ---
+      - name: Show script
+        run: |
+          echo "----- cot_fetch.py (first 60 lines) -----"
+          sed -n '1,60p' cot_fetch.py
+
+      - name: Compile script (syntax check)
+        run: |
+          python -m py_compile cot_fetch.py
+
       - name: Run fetcher (retry once on failure)
         env:
           OUT_DIR: data
@@ -46,7 +56,6 @@ jobs:
       - name: Detect changes
         id: changes
         run: |
-          git status --porcelain
           if [ -z "$(git status --porcelain)" ]; then
             echo "changed=false" >> $GITHUB_OUTPUT
           else
