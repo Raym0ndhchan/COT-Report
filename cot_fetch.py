@@ -1,6 +1,7 @@
 # cot_fetch.py
 # Fetches Disaggregated Futures-Only COT (current year ZIP), selects the latest report week,
 # saves date-stamped CSV/Parquet into data/YYYY/, and refreshes a "latest" file for that year.
+#testing code change here for josh's tool 
 
 import io, zipfile, re, os, sys
 from pathlib import Path
